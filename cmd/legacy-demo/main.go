@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 
-	"livinglegacyengine/engine"
+	"github.com/GuiltedRose/livinglegacyengine/engine"
 )
 
 func main() {

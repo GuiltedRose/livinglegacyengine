@@ -3,7 +3,7 @@ package engine_test
 import (
 	"fmt"
 
-	"livinglegacyengine/engine"
+	"github.com/GuiltedRose/livinglegacyengine/engine"
 )
 
 func ExampleWorld_lootDungeonFlow() {
