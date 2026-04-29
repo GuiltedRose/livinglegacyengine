@@ -8,12 +8,15 @@ import (
 type EventType string
 
 const (
-	EventItemCrafted    EventType = "item_crafted"
-	EventCharacterDied  EventType = "character_died"
-	EventDungeonBorn    EventType = "dungeon_born"
-	EventDungeonLooted  EventType = "dungeon_looted"
-	EventDungeonDecayed EventType = "dungeon_decayed"
-	EventRespawned      EventType = "character_respawned"
+	EventItemCrafted     EventType = "item_crafted"
+	EventCharacterDied   EventType = "character_died"
+	EventLootDeposited   EventType = "loot_deposited"
+	EventDungeonSpawned  EventType = "dungeon_spawned"
+	EventDungeonLooted   EventType = "dungeon_looted"
+	EventDungeonLocked   EventType = "dungeon_locked"
+	EventDungeonUnlocked EventType = "dungeon_unlocked"
+	EventDungeonDecayed  EventType = "dungeon_decayed"
+	EventRespawned       EventType = "character_respawned"
 )
 
 type Event struct {
@@ -28,14 +31,15 @@ type Event struct {
 }
 
 type World struct {
-	Character   Character
-	Dungeons    map[DungeonID]LootDungeon
-	Crafters    map[ActorID]int
-	Actors      map[ActorID]Actor
-	Rumors      []Rumor
-	Memories    map[ActorID]Memory
-	Perceptions map[PerceptionKey]Perception
-	Events      []Event
+	PrimaryCharacter Character
+	Characters       map[CharacterID]Character
+	Dungeons         map[DungeonID]LootDungeon
+	Crafters         map[ActorID]int
+	Actors           map[ActorID]Actor
+	Rumors           []Rumor
+	Memories         map[ActorID]Memory
+	Perceptions      map[PerceptionKey]Perception
+	Events           []Event
 
 	now       func() time.Time
 	nextRunID int
@@ -49,15 +53,16 @@ func NewWorld(character Character) *World {
 
 func NewWorldWithRules(character Character, rules Rules) *World {
 	return &World{
-		Character:   character,
-		Dungeons:    make(map[DungeonID]LootDungeon),
-		Crafters:    make(map[ActorID]int),
-		Actors:      make(map[ActorID]Actor),
-		Memories:    make(map[ActorID]Memory),
-		Perceptions: make(map[PerceptionKey]Perception),
-		now:         time.Now,
-		rules:       rules.normalized(),
-		indices:     newWorldIndices(),
+		PrimaryCharacter: character,
+		Characters:       map[CharacterID]Character{character.ID: cloneCharacter(character)},
+		Dungeons:         make(map[DungeonID]LootDungeon),
+		Crafters:         make(map[ActorID]int),
+		Actors:           make(map[ActorID]Actor),
+		Memories:         make(map[ActorID]Memory),
+		Perceptions:      make(map[PerceptionKey]Perception),
+		now:              time.Now,
+		rules:            rules.normalized(),
+		indices:          newWorldIndices(),
 	}
 }
 
@@ -71,106 +76,156 @@ func (w *World) SetRules(rules Rules) {
 	w.rules = rules.normalized()
 }
 
-func (w *World) AddCraftedItem(item CraftedItem) error {
-	itemValue := w.rules.ItemLegacyValue(item)
-	if itemValue < 0 {
-		return fmt.Errorf("item %q has negative legacy value", item.ID)
-	}
-	if err := w.Character.Carry(item); err != nil {
-		return err
-	}
-	w.Crafters[item.CrafterID] += itemValue
-	w.record(Event{
-		Type:        EventItemCrafted,
-		Description: fmt.Sprintf("%s carries %s, crafted by %s", w.Character.Name, item.Name, item.CrafterID),
-		SubjectID:   string(item.CrafterID),
-		ObjectID:    string(item.ID),
-		Subject:     NewTargetRef(string(item.CrafterID), TargetActor, ""),
-		Object:      ItemRef(item),
-		Data: map[string]string{
-			"character_id": string(w.Character.ID),
-			"item_name":    item.Name,
-		},
-	})
-	return nil
-}
-
-func (w *World) KillCharacter(cause string) (LootDungeon, error) {
-	if !w.Character.Alive {
-		return LootDungeon{}, fmt.Errorf("%s is already dead", w.Character.Name)
-	}
-	if cause == "" {
-		cause = "unknown danger"
-	}
-
-	nextDeath := w.Character.Deaths + 1
-	w.nextRunID++
-	dungeonID := DungeonID(fmt.Sprintf("dungeon-%04d", w.nextRunID))
-
-	dungeonCharacter := w.Character
-	dungeonCharacter.Deaths = nextDeath
-	dungeon, err := NewLootDungeonWithRules(dungeonID, dungeonCharacter, w.now(), w.rules)
+func (w *World) SpawnLootDungeon(id DungeonID, name string, areaID AreaID, depth int) (LootDungeon, error) {
+	dungeon, err := NewSpawnedLootDungeon(id, name, areaID, depth, w.now())
 	if err != nil {
-		w.nextRunID--
 		return LootDungeon{}, err
 	}
-
-	w.Character.Alive = false
-	w.Character.Deaths = nextDeath
+	if _, exists := w.Dungeons[dungeon.ID]; exists {
+		return LootDungeon{}, fmt.Errorf("%w: %s", ErrDuplicateDungeon, dungeon.ID)
+	}
 	w.Dungeons[dungeon.ID] = dungeon
 	w.record(Event{
-		Type:        EventCharacterDied,
-		Description: fmt.Sprintf("%s died to %s", w.Character.Name, cause),
-		SubjectID:   string(w.Character.ID),
-		Subject:     CharacterRef(w.Character),
-		Data: map[string]string{
-			"cause": cause,
-		},
-	})
-	w.record(Event{
-		Type:        EventDungeonBorn,
-		Description: fmt.Sprintf("%s became a loot dungeon worth %d legacy", dungeon.Name, dungeon.LegacyValue),
-		SubjectID:   string(w.Character.ID),
+		Type:        EventDungeonSpawned,
+		Description: fmt.Sprintf("%s spawned in area %s", dungeon.Name, dungeon.AreaID),
 		ObjectID:    string(dungeon.ID),
-		Subject:     CharacterRef(w.Character),
 		Object:      DungeonRef(dungeon),
 		Data: map[string]string{
-			"dungeon_name": dungeon.Name,
+			"area_id": string(dungeon.AreaID),
 		},
 	})
 	return dungeon, nil
 }
 
-func (w *World) RespawnCharacter() {
-	w.Character.Respawn()
+func (w *World) DepositDeathLoot(actorID ActorID, areaID AreaID, items []CraftedItem, cause string) (LootDungeon, error) {
+	if actorID == "" {
+		return LootDungeon{}, fmt.Errorf("%w", ErrActorRequired)
+	}
+	if areaID == "" {
+		areaID = DefaultAreaID
+	}
+	if cause == "" {
+		cause = "unknown danger"
+	}
+
+	dungeonID, dungeon, ok := w.firstDungeonInArea(areaID)
+	if !ok {
+		return LootDungeon{}, fmt.Errorf("%w: %s", ErrNoLootDungeonInArea, areaID)
+	}
+	if dungeon.Status == DungeonDecayed {
+		return LootDungeon{}, fmt.Errorf("%w: %s", ErrDungeonDecayed, dungeon.ID)
+	}
+
+	eligibleItems := make([]CraftedItem, 0, len(items))
+	depositValue := 0
+	for _, item := range items {
+		if !w.rules.EligibleForDungeon(item) {
+			continue
+		}
+		itemValue := w.rules.ItemLegacyValue(item)
+		if itemValue < 0 {
+			return LootDungeon{}, fmt.Errorf("item %q has negative legacy value", item.ID)
+		}
+		eligibleItems = append(eligibleItems, item)
+		depositValue += itemValue
+	}
+	if len(eligibleItems) == 0 {
+		return LootDungeon{}, fmt.Errorf("%w", ErrNoEligibleLoot)
+	}
+
+	w.unlockActorDungeons(actorID)
+	dungeonID, dungeon, ok = w.firstDungeonInArea(areaID)
+	if !ok {
+		return LootDungeon{}, fmt.Errorf("%w: %s", ErrNoLootDungeonInArea, areaID)
+	}
+	for _, item := range eligibleItems {
+		deposit := DepositedLoot{
+			ID:          newLootDepositID(dungeon.ID, actorID, len(dungeon.Deposits)+1),
+			Item:        item,
+			DroppedBy:   actorID,
+			AreaID:      areaID,
+			DungeonID:   dungeon.ID,
+			Cause:       cause,
+			DepositedAt: w.now(),
+			Attributes:  map[string]string{},
+		}
+		dungeon.Deposits = append(dungeon.Deposits, deposit)
+		dungeon.Items = append(dungeon.Items, item)
+	}
+	dungeon.LegacyValue += depositValue
+	if dungeon.Status != DungeonLocked {
+		dungeon.Status = DungeonActive
+	}
+	w.Dungeons[dungeonID] = dungeon
 	w.record(Event{
-		Type:        EventRespawned,
-		Description: fmt.Sprintf("%s returns for another run", w.Character.Name),
-		SubjectID:   string(w.Character.ID),
-		Subject:     CharacterRef(w.Character),
+		Type:        EventLootDeposited,
+		Description: fmt.Sprintf("%s deposited %d crafted items into %s", actorID, len(eligibleItems), dungeon.Name),
+		SubjectID:   string(actorID),
+		ObjectID:    string(dungeon.ID),
+		Subject:     NewTargetRef(string(actorID), TargetActor, ""),
+		Object:      DungeonRef(dungeon),
+		Data: map[string]string{
+			"area_id": string(areaID),
+			"cause":   cause,
+		},
 	})
+	return dungeon, nil
 }
 
 func (w *World) LootDungeon(id DungeonID, looter ActorID) ([]CraftedItem, error) {
 	if looter == "" {
-		return nil, fmt.Errorf("looter id is required")
+		return nil, fmt.Errorf("%w", ErrActorRequired)
 	}
 	dungeon, ok := w.Dungeons[id]
 	if !ok {
-		return nil, fmt.Errorf("dungeon %q does not exist", id)
+		return nil, fmt.Errorf("%w: %s", ErrDungeonNotFound, id)
 	}
-	if dungeon.Status != DungeonSealed {
+	if dungeon.Status == DungeonDormant {
+		return nil, fmt.Errorf("%w: %s", ErrDungeonDormant, id)
+	}
+	if dungeon.Status == DungeonLocked {
+		return nil, fmt.Errorf("%w: %s locked to %s", ErrDungeonLocked, id, dungeon.LockedTo)
+	}
+	if dungeon.Status != DungeonActive {
 		return nil, fmt.Errorf("dungeon %q is %s", id, dungeon.Status)
 	}
+	if len(dungeon.Items) == 0 {
+		dungeon.Status = DungeonDormant
+		w.Dungeons[id] = dungeon
+		return nil, fmt.Errorf("dungeon %q has no deposited loot", id)
+	}
 
-	dungeon.Status = DungeonLooted
+	index := w.rules.SelectLoot(dungeon, looter)
+	if index < 0 || index >= len(dungeon.Items) {
+		return nil, fmt.Errorf("dungeon %q has no deposited loot", id)
+	}
+	depositIndex := dungeon.unclaimedDepositIndex(index)
+	if depositIndex < 0 {
+		return nil, fmt.Errorf("dungeon %q has no deposited loot", id)
+	}
+	sourceDeposit := dungeon.Deposits[depositIndex]
+	source := sourceDeposit.Item
+	reward := w.rules.LootReward(source)
+	if reward.Rarity < source.Rarity {
+		return nil, fmt.Errorf("%w: reward rarity %d is lower than dropped item rarity %d", ErrRewardDowngrade, reward.Rarity, source.Rarity)
+	}
+	loot := []CraftedItem{reward}
+	lootValue := w.rules.ItemLegacyValue(source)
+	dungeon.Deposits[depositIndex].ClaimedBy = looter
+	dungeon.Deposits[depositIndex].ClaimedAt = w.now()
+	dungeon.Items = append(dungeon.Items[:index], dungeon.Items[index+1:]...)
+	dungeon.LegacyValue -= lootValue
+	if dungeon.LegacyValue < 0 {
+		dungeon.LegacyValue = 0
+	}
+	dungeon.Status = DungeonLocked
 	dungeon.LootedBy = looter
+	dungeon.LockedTo = looter
 	w.Dungeons[id] = dungeon
-	w.Character.LegacyScore += dungeon.LegacyValue
-	w.Character.RecoveredItems = append(w.Character.RecoveredItems, dungeon.Items...)
+	w.applyLootToCharacter(looter, loot, lootValue)
 	w.record(Event{
 		Type:        EventDungeonLooted,
-		Description: fmt.Sprintf("%s looted %s; legacy increased by %d", looter, dungeon.Name, dungeon.LegacyValue),
+		Description: fmt.Sprintf("%s looted %s; legacy increased by %d", looter, dungeon.Name, lootValue),
 		SubjectID:   string(looter),
 		ObjectID:    string(dungeon.ID),
 		Subject:     NewTargetRef(string(looter), TargetActor, ""),
@@ -179,7 +234,15 @@ func (w *World) LootDungeon(id DungeonID, looter ActorID) ([]CraftedItem, error)
 			"dungeon_name": dungeon.Name,
 		},
 	})
-	return append([]CraftedItem(nil), dungeon.Items...), nil
+	w.record(Event{
+		Type:        EventDungeonLocked,
+		Description: fmt.Sprintf("%s locked to %s until their next death", dungeon.Name, looter),
+		SubjectID:   string(looter),
+		ObjectID:    string(dungeon.ID),
+		Subject:     NewTargetRef(string(looter), TargetActor, ""),
+		Object:      DungeonRef(dungeon),
+	})
+	return cloneItems(loot), nil
 }
 
 func (w *World) DecayDungeons() []DungeonID {
@@ -206,6 +269,38 @@ func (w *World) DecayDungeons() []DungeonID {
 		})
 	}
 	return decayed
+}
+
+func (w *World) firstDungeonInArea(areaID AreaID) (DungeonID, LootDungeon, bool) {
+	for id, dungeon := range w.Dungeons {
+		if dungeon.AreaID == areaID && dungeon.Status != DungeonDecayed {
+			return id, dungeon, true
+		}
+	}
+	return "", LootDungeon{}, false
+}
+
+func (w *World) unlockActorDungeons(actorID ActorID) {
+	for id, dungeon := range w.Dungeons {
+		if dungeon.Status != DungeonLocked || dungeon.LockedTo != actorID {
+			continue
+		}
+		dungeon.LockedTo = ""
+		if len(dungeon.Items) == 0 {
+			dungeon.Status = DungeonDormant
+		} else {
+			dungeon.Status = DungeonActive
+		}
+		w.Dungeons[id] = dungeon
+		w.record(Event{
+			Type:        EventDungeonUnlocked,
+			Description: fmt.Sprintf("%s unlocked after %s died again", dungeon.Name, actorID),
+			SubjectID:   string(actorID),
+			ObjectID:    string(dungeon.ID),
+			Subject:     NewTargetRef(string(actorID), TargetActor, ""),
+			Object:      DungeonRef(dungeon),
+		})
+	}
 }
 
 func (w *World) record(event Event) {

@@ -5,30 +5,34 @@ import "fmt"
 const CurrentSnapshotVersion = 1
 
 type WorldSnapshot struct {
-	Version     int                       `json:"version"`
-	Character   Character                 `json:"character"`
-	Dungeons    map[DungeonID]LootDungeon `json:"dungeons,omitempty"`
-	Crafters    map[ActorID]int           `json:"crafters,omitempty"`
-	Actors      map[ActorID]Actor         `json:"actors,omitempty"`
-	Rumors      []Rumor                   `json:"rumors,omitempty"`
-	Memories    map[ActorID]Memory        `json:"memories,omitempty"`
-	Perceptions []Perception              `json:"perceptions,omitempty"`
-	Events      []Event                   `json:"events,omitempty"`
-	NextRunID   int                       `json:"next_run_id"`
+	Version          int                       `json:"version"`
+	PrimaryCharacter Character                 `json:"primary_character"`
+	Character        Character                 `json:"character"`
+	Characters       map[CharacterID]Character `json:"characters,omitempty"`
+	Dungeons         map[DungeonID]LootDungeon `json:"dungeons,omitempty"`
+	Crafters         map[ActorID]int           `json:"crafters,omitempty"`
+	Actors           map[ActorID]Actor         `json:"actors,omitempty"`
+	Rumors           []Rumor                   `json:"rumors,omitempty"`
+	Memories         map[ActorID]Memory        `json:"memories,omitempty"`
+	Perceptions      []Perception              `json:"perceptions,omitempty"`
+	Events           []Event                   `json:"events,omitempty"`
+	NextRunID        int                       `json:"next_run_id"`
 }
 
 func (w *World) Snapshot() WorldSnapshot {
 	return WorldSnapshot{
-		Version:     CurrentSnapshotVersion,
-		Character:   cloneCharacter(w.Character),
-		Dungeons:    cloneDungeons(w.Dungeons),
-		Crafters:    cloneActorScores(w.Crafters),
-		Actors:      cloneActors(w.Actors),
-		Rumors:      cloneRumors(w.Rumors),
-		Memories:    cloneMemories(w.Memories),
-		Perceptions: clonePerceptionList(w.Perceptions),
-		Events:      cloneEvents(w.Events),
-		NextRunID:   w.nextRunID,
+		Version:          CurrentSnapshotVersion,
+		PrimaryCharacter: cloneCharacter(w.PrimaryCharacter),
+		Character:        cloneCharacter(w.PrimaryCharacter),
+		Characters:       cloneCharacters(w.Characters),
+		Dungeons:         cloneDungeons(w.Dungeons),
+		Crafters:         cloneActorScores(w.Crafters),
+		Actors:           cloneActors(w.Actors),
+		Rumors:           cloneRumors(w.Rumors),
+		Memories:         cloneMemories(w.Memories),
+		Perceptions:      clonePerceptionList(w.Perceptions),
+		Events:           cloneEvents(w.Events),
+		NextRunID:        w.nextRunID,
 	}
 }
 
@@ -40,7 +44,18 @@ func RestoreWorld(snapshot WorldSnapshot) (*World, error) {
 	if err := ValidateSnapshot(snapshot); err != nil {
 		return nil, err
 	}
-	world := NewWorld(cloneCharacter(snapshot.Character))
+	primary := snapshot.PrimaryCharacter
+	if primary.ID == "" {
+		primary = snapshot.Character
+	}
+	world := NewWorld(cloneCharacter(primary))
+	world.Characters = cloneCharacters(snapshot.Characters)
+	if len(world.Characters) == 0 {
+		world.Characters = map[CharacterID]Character{world.PrimaryCharacter.ID: cloneCharacter(world.PrimaryCharacter)}
+	}
+	if registryPrimary, ok := world.Characters[world.PrimaryCharacter.ID]; ok {
+		world.PrimaryCharacter = cloneCharacter(registryPrimary)
+	}
 	world.Dungeons = cloneDungeons(snapshot.Dungeons)
 	world.Crafters = cloneActorScores(snapshot.Crafters)
 	world.Actors = cloneActors(snapshot.Actors)
@@ -60,7 +75,7 @@ func ValidateSnapshot(snapshot WorldSnapshot) error {
 	if snapshot.Version > CurrentSnapshotVersion {
 		return fmt.Errorf("snapshot version %d is newer than supported version %d", snapshot.Version, CurrentSnapshotVersion)
 	}
-	if snapshot.Character.ID == "" {
+	if snapshot.PrimaryCharacter.ID == "" && snapshot.Character.ID == "" {
 		return fmt.Errorf("snapshot character id is required")
 	}
 	return nil
@@ -70,8 +85,14 @@ func MigrateSnapshot(snapshot WorldSnapshot) (WorldSnapshot, error) {
 	switch snapshot.Version {
 	case 0:
 		snapshot.Version = CurrentSnapshotVersion
+		if snapshot.PrimaryCharacter.ID == "" {
+			snapshot.PrimaryCharacter = snapshot.Character
+		}
 		return snapshot, nil
 	case CurrentSnapshotVersion:
+		if snapshot.PrimaryCharacter.ID == "" {
+			snapshot.PrimaryCharacter = snapshot.Character
+		}
 		return snapshot, nil
 	default:
 		if snapshot.Version > CurrentSnapshotVersion {
@@ -85,6 +106,14 @@ func cloneCharacter(character Character) Character {
 	character.Inventory = cloneItems(character.Inventory)
 	character.RecoveredItems = cloneItems(character.RecoveredItems)
 	return character
+}
+
+func cloneCharacters(characters map[CharacterID]Character) map[CharacterID]Character {
+	cloned := make(map[CharacterID]Character, len(characters))
+	for id, character := range characters {
+		cloned[id] = cloneCharacter(character)
+	}
+	return cloned
 }
 
 func cloneItems(items []CraftedItem) []CraftedItem {
@@ -104,8 +133,24 @@ func cloneDungeons(dungeons map[DungeonID]LootDungeon) map[DungeonID]LootDungeon
 	cloned := make(map[DungeonID]LootDungeon, len(dungeons))
 	for id, dungeon := range dungeons {
 		dungeon.Items = cloneItems(dungeon.Items)
+		dungeon.Deposits = cloneDeposits(dungeon.Deposits)
+		dungeon.syncDepositsFromItems(dungeon.CreatedAt)
+		dungeon.syncItemsFromDeposits()
 		dungeon.Attributes = cloneStringMap(dungeon.Attributes)
 		cloned[id] = dungeon
+	}
+	return cloned
+}
+
+func cloneDeposits(deposits []DepositedLoot) []DepositedLoot {
+	if deposits == nil {
+		return nil
+	}
+	cloned := make([]DepositedLoot, len(deposits))
+	for i, deposit := range deposits {
+		cloned[i] = deposit
+		cloned[i].Item = cloneItems([]CraftedItem{deposit.Item})[0]
+		cloned[i].Attributes = cloneStringMap(deposit.Attributes)
 	}
 	return cloned
 }

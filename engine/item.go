@@ -9,6 +9,7 @@ type CraftedItem struct {
 	ID         ItemID            `json:"id"`
 	Name       string            `json:"name"`
 	CrafterID  ActorID           `json:"crafter_id"`
+	Rarity     int               `json:"rarity"`
 	Quality    int               `json:"quality"`
 	Power      int               `json:"power"`
 	Tags       []string          `json:"tags,omitempty"`
@@ -36,6 +37,7 @@ func NewCraftedItem(id ItemID, name string, crafterID ActorID, quality int, powe
 		ID:         id,
 		Name:       name,
 		CrafterID:  crafterID,
+		Rarity:     quality,
 		Quality:    quality,
 		Power:      power,
 		Tags:       append([]string(nil), tags...),

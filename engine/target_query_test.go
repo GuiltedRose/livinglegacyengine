@@ -16,20 +16,25 @@ func TestTargetRefsAreStoredOnEventsRumorsAndPerceptions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := world.AddCraftedItem(item); err != nil {
+	if err := world.CarryItem(character.ID, item); err != nil {
 		t.Fatal(err)
 	}
-	dungeon, err := world.KillCharacter("mirror hall")
+	if _, err := world.SpawnLootDungeon("mirror-cache", "Mirror Cache", DefaultAreaID, 2); err != nil {
+		t.Fatal(err)
+	}
+	dungeon, err := world.KillCharacterByID(character.ID, "mirror hall", DefaultAreaID)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	events := world.EventsForTarget(string(dungeon.ID))
-	if len(events) != 1 {
-		t.Fatalf("dungeon event count = %d, want 1", len(events))
+	if len(events) != 2 {
+		t.Fatalf("dungeon event count = %d, want 2", len(events))
 	}
-	if events[0].Object.Kind != TargetDungeon {
-		t.Fatalf("event object kind = %q, want %q", events[0].Object.Kind, TargetDungeon)
+	for _, event := range events {
+		if event.Object.Kind != TargetDungeon {
+			t.Fatalf("event object kind = %q, want %q", event.Object.Kind, TargetDungeon)
+		}
 	}
 
 	rumor, err := NewRumor("rumor-1", "source-1", "The cache is under glass.", 1, 5, time.Unix(1, 0).UTC())

@@ -4,16 +4,16 @@
 *Designed for open innovation — no patents, no restrictions.*
 
 ## Overview
-The Living Legacy Engine is a small standalone Go module for games where one character dies often and the world remembers what those deaths leave behind.
+The Living Legacy Engine is a small standalone Go module for games where characters die often and the world remembers what those deaths leave behind.
 
-Legacy is no longer inherited through heirs or bloodlines. The same character returns again and again, while the durable legacy comes from loot dungeons created at death. Those dungeons contain only actor-crafted items, turning the crafting economy into the historical record of the world.
+Legacy is no longer inherited through heirs or bloodlines. Characters return again and again, while the durable legacy comes from pre-spawned loot dungeons that open only when crafted loot is lost to death. Those dungeons contain only actor-crafted items, turning the crafting economy into the historical record of the world.
 
 The engine is intentionally agnostic about genre, networking, storage, rendering, combat, economy, and quest structure. A roguelike, MUD, MMO, tabletop campaign manager, survival game, or narrative sim should all be able to embed the same core loop and attach their own systems around it.
 
 ## Core Principles
 - **Actor Neutrality**: No actor is inherently special. Identity, status, and reputation must be earned through events.
-- **One Returning Character**: There is no inheritance chain. The same character respawns after death.
-- **Legacy Through Loot**: Death creates loot dungeons. Clearing those dungeons feeds the character's legacy score.
+- **Returning Characters**: There is no inheritance chain. Characters respawn after death.
+- **Legacy Through Loot**: Death deposits crafted loot into existing area dungeons. Clearing those dungeons feeds legacy.
 - **Actor-Crafted Economy**: Loot dungeons are populated only by crafted items made by known actors.
 - **Dynamic World State**: Factions, regions, and dungeons can evolve around actor action.
 - **Emergent Narrative**: Every world can be seeded, simulated, and integrated into a larger game.
@@ -32,10 +32,11 @@ The public API currently lives in `engine/` and is intentionally dependency-free
 
 The engine owns:
 - Actor registry
+- Character registry, plus an explicit `PrimaryCharacter` convenience field
 - Target references for actors, items, dungeons, regions, events, and host-game concepts
 - Character death/respawn state
 - Crafted item eligibility
-- Loot dungeon creation and looting
+- Loot dungeon spawning, death loot deposits, clearing, and anti-farm locks
 - Legacy scoring
 - Rumor creation and propagation
 - Actor memory records
@@ -44,6 +45,8 @@ The engine owns:
 - Event observation that teaches memory and updates perception
 - Snapshot/restore state
 - Timeline and state query helpers
+- Optional concurrency wrapper
+- Optional file-backed snapshot store
 
 The host game owns:
 - Storage backend
@@ -83,6 +86,11 @@ rules.ItemLegacyValue = func(item engine.CraftedItem) int {
 rules.EligibleForDungeon = func(item engine.CraftedItem) bool {
 	return item.Attributes["binds_legacy"] == "true"
 }
+rules.LootReward = func(source engine.CraftedItem) engine.CraftedItem {
+	reward := source
+	reward.Rarity = source.Rarity + 1
+	return reward
+}
 
 world := engine.NewWorldWithRules(character, rules)
 ```
@@ -90,12 +98,13 @@ world := engine.NewWorldWithRules(character, rules)
 Available hooks:
 - `EligibleForDungeon`: decides which carried items become dungeon loot
 - `ItemLegacyValue`: scores items for crafter fame and dungeon legacy
-- `DungeonName`: names death-created dungeons
-- `DungeonDepth`: maps character/run state to dungeon depth
-- `DungeonAttributes`: attaches host-game metadata to new dungeons
-- `ShouldDecayDungeon`: decides when sealed dungeons decay
+- `ShouldDecayDungeon`: decides when active dungeons decay
+- `SelectLoot`: chooses which pooled item is returned on clear
+- `LootReward`: maps a dropped crafted item to the reward returned by a dungeon clear
 - `RumorPerception`: maps a rumor into perception changes
 - `EventPerception`: maps an event into perception changes
+
+`LootReward` may upgrade a reward, but it may not return an item with lower rarity than the dropped source item.
 
 Rules are runtime policy, not saved state. Snapshots store the world data; host games should restore the world and then apply the rules for that game/version.
 
@@ -124,23 +133,38 @@ if err != nil {
 
 The JSON helpers use Go's standard `encoding/json` package. Host games can store the bytes anywhere: files, SQL, object storage, save slots, test fixtures, or network messages.
 
+A small file-backed store is included for simple integrations and tests:
+
+```go
+store := engine.NewFileSnapshotStore("saves/world.json")
+if err := store.Save(world.Snapshot()); err != nil {
+	return err
+}
+loaded, err := store.Load()
+```
+
+For shared server access, wrap a world with `NewSafeWorld` and use `View`/`Update` closures to guard concurrent reads and writes.
+
 ## Key Systems
 
 ### 1. Character Death Loop
-The engine tracks one character:
+The engine tracks a registry of characters:
 - Alive/dead state
 - Death count
 - Inventory
 - Recovered items
 - Legacy score
 
-When the character dies, their current crafted inventory becomes the seed of a loot dungeon.
+`World.Characters` is the multiplayer source of truth. `World.PrimaryCharacter` is an explicit convenience mirror for games that still want a main returning character.
+
+When a character dies in an area, eligible crafted inventory is deposited into a spawned loot dungeon in that area. Death without crafted loot does not open or unlock the dungeon.
 
 ### 2. Crafted Item System
 Items must have:
 - Stable item ID
 - Display name
 - Actor crafter ID
+- Rarity
 - Quality
 - Power
 - Optional tags
@@ -149,25 +173,62 @@ Items must have:
 Only actor-crafted items are accepted into the dungeon/legacy loop. In a multiplayer game the actor may be a player. In another game it may be a settlement, guild, NPC artisan, procedural civilization, or imported campaign entity.
 
 ### 3. Loot Dungeon System
-On death, the engine creates a sealed loot dungeon containing the crafted items carried by the character.
+Loot dungeons are spawned with the world, usually by area:
+
+```go
+dungeon, err := world.SpawnLootDungeon("ash-cache", "Ash Cache", "ash-road", 3)
+```
+
+They begin dormant and cannot be cleared. When an actor dies in the area with eligible crafted loot, that loot is deposited into the area's dungeon and the dungeon becomes active:
+
+```go
+dungeon, err := world.KillCharacterByID(character.ID, "the ash stair", "ash-road")
+```
+
+Other actors can also deposit death loot directly:
+
+```go
+dungeon, err := world.DepositDeathLoot("actor-id", "ash-road", craftedItems, "ambush")
+```
+
+All crafted death loot in the same area goes into the same dungeon pool. If five actors die in the same area, their eligible crafted items share that pool, so a clearer can recover anyone's item, including their own. The default selection chooses one item from the pool without owner weighting; host games can layer presentation, reward tables, rarity upgrades, or additional randomness around the same pooled state.
 
 Dungeons track:
-- Origin run
+- Area
 - Depth
-- Crafted item contents
+- Current unclaimed crafted item pool
+- Deposit history
 - Legacy value
-- Looted state
-- Looter ID
+- Status
+- Last looter ID
+- Lock owner
 
-When a dungeon is looted, the same character's legacy score increases.
+When a dungeon is cleared, the engine selects one item from the pooled crafted loot and then locks the dungeon to the actor who cleared it. A locked dungeon cannot be farmed. It only unlocks when that same actor dies again with eligible crafted loot, which also deposits that new loot into the area pool.
+
+Reward generation has a rarity floor: the returned reward must have rarity greater than or equal to the dropped source item. The default rule returns the source item unchanged.
+
+Each deposited item is also stored as a `DepositedLoot` record. The record keeps:
+- Deposit ID
+- Crafted item
+- Dropping actor
+- Area and dungeon IDs
+- Death cause
+- Deposit time
+- Claiming actor
+- Claim time
+- Attributes
+
+`LootDungeon.Items` is a compatibility mirror of the current unclaimed pool. `LootDungeon.Deposits` is the durable provenance ledger, including claimed loot.
 
 ### 4. Event Log
 The world records major events:
 - Crafted item added
 - Character death
-- Dungeon creation
+- Dungeon spawn
+- Loot deposit
 - Character respawn
 - Dungeon looted
+- Dungeon locked/unlocked
 
 Events include readable descriptions plus structured subject/object IDs and string data so host games can build logs, notifications, analytics, admin tools, or persistence without parsing prose.
 
@@ -176,7 +237,7 @@ Host games can also feed their own events into the engine:
 ```go
 event, perceptions, err := world.RecordObservedEvent(engine.Event{
 	Type:        engine.EventDungeonLooted,
-	Description: "Ash cleared the sealed cache.",
+	Description: "Ash cleared the cache.",
 	Subject:     engine.CharacterRef(character),
 }, "witness-1", "witness-2")
 ```
@@ -249,6 +310,8 @@ These helpers are intentionally small and composable. Host games can build riche
 `World.Snapshot` and `RestoreWorld` provide plain serializable state. The engine does not choose a storage backend; host games can encode snapshots as JSON, save them in SQL, sync them through a server, or keep them in memory for tests.
 
 Snapshots include a `version` field. The current version is exposed as `CurrentSnapshotVersion`. Restore runs snapshots through `MigrateSnapshot` and `ValidateSnapshot` before hydrating a world. Version `0` is treated as a legacy pre-version snapshot and migrated to the current version; snapshots newer than the engine supports fail clearly.
+
+Snapshots write `primary_character` and keep the older `character` field as a compatibility bridge for pre-registry saves.
 
 Query indices are intentionally private runtime state. They are rebuilt when a snapshot is restored, so saved data stays portable and does not depend on internal indexing details.
 

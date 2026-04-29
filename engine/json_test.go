@@ -28,10 +28,13 @@ func TestSnapshotJSONRoundTripRestoresWorld(t *testing.T) {
 		t.Fatal(err)
 	}
 	item.Attributes["material"] = "glass"
-	if err := world.AddCraftedItem(item); err != nil {
+	if err := world.CarryItem(character.ID, item); err != nil {
 		t.Fatal(err)
 	}
-	dungeon, err := world.KillCharacter("the mirror hall")
+	if _, err := world.SpawnLootDungeon("mirror-cache", "Mirror Cache", DefaultAreaID, 2); err != nil {
+		t.Fatal(err)
+	}
+	dungeon, err := world.KillCharacterByID(character.ID, "the mirror hall", DefaultAreaID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,8 +73,8 @@ func TestSnapshotJSONRoundTripRestoresWorld(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if restored.Character.ID != character.ID {
-		t.Fatalf("character id = %q, want %q", restored.Character.ID, character.ID)
+	if restored.PrimaryCharacter.ID != character.ID {
+		t.Fatalf("character id = %q, want %q", restored.PrimaryCharacter.ID, character.ID)
 	}
 	if restored.Dungeons[dungeon.ID].Items[0].Attributes["material"] != "glass" {
 		t.Fatalf("restored item attributes were lost")

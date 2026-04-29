@@ -1,26 +1,21 @@
 package engine
 
-import (
-	"fmt"
-	"time"
-)
+import "time"
 
 type ItemEligibilityRule func(item CraftedItem) bool
 type ItemLegacyRule func(item CraftedItem) int
-type DungeonNameRule func(character Character, run int) string
-type DungeonDepthRule func(character Character, run int) int
-type DungeonAttributesRule func(character Character, items []CraftedItem) map[string]string
 type DungeonDecayRule func(dungeon LootDungeon, now time.Time) bool
+type LootSelectionRule func(dungeon LootDungeon, looter ActorID) int
+type LootRewardRule func(source CraftedItem) CraftedItem
 type RumorPerceptionRule func(rumor Rumor) PerceptionDelta
 type EventPerceptionRule func(event Event) PerceptionDelta
 
 type Rules struct {
 	EligibleForDungeon ItemEligibilityRule
 	ItemLegacyValue    ItemLegacyRule
-	DungeonName        DungeonNameRule
-	DungeonDepth       DungeonDepthRule
-	DungeonAttributes  DungeonAttributesRule
 	ShouldDecayDungeon DungeonDecayRule
+	SelectLoot         LootSelectionRule
+	LootReward         LootRewardRule
 	RumorPerception    RumorPerceptionRule
 	EventPerception    EventPerceptionRule
 }
@@ -33,17 +28,14 @@ func DefaultRules() Rules {
 		ItemLegacyValue: func(item CraftedItem) int {
 			return item.LegacyValue()
 		},
-		DungeonName: func(character Character, run int) string {
-			return fmt.Sprintf("%s's Fallen Cache %d", character.Name, run)
-		},
-		DungeonDepth: func(character Character, _ int) int {
-			return max(1, character.Level)
-		},
-		DungeonAttributes: func(Character, []CraftedItem) map[string]string {
-			return map[string]string{}
-		},
 		ShouldDecayDungeon: func(LootDungeon, time.Time) bool {
 			return false
+		},
+		SelectLoot: func(dungeon LootDungeon, looter ActorID) int {
+			return selectLootIndex(dungeon, looter)
+		},
+		LootReward: func(source CraftedItem) CraftedItem {
+			return source
 		},
 		RumorPerception: func(rumor Rumor) PerceptionDelta {
 			confidence := int(rumor.Truth * 100)
@@ -66,17 +58,14 @@ func (r Rules) normalized() Rules {
 	if r.ItemLegacyValue == nil {
 		r.ItemLegacyValue = defaults.ItemLegacyValue
 	}
-	if r.DungeonName == nil {
-		r.DungeonName = defaults.DungeonName
-	}
-	if r.DungeonDepth == nil {
-		r.DungeonDepth = defaults.DungeonDepth
-	}
-	if r.DungeonAttributes == nil {
-		r.DungeonAttributes = defaults.DungeonAttributes
-	}
 	if r.ShouldDecayDungeon == nil {
 		r.ShouldDecayDungeon = defaults.ShouldDecayDungeon
+	}
+	if r.SelectLoot == nil {
+		r.SelectLoot = defaults.SelectLoot
+	}
+	if r.LootReward == nil {
+		r.LootReward = defaults.LootReward
 	}
 	if r.RumorPerception == nil {
 		r.RumorPerception = defaults.RumorPerception

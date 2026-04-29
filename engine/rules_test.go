@@ -1,12 +1,11 @@
 package engine
 
 import (
-	"fmt"
 	"testing"
 	"time"
 )
 
-func TestCustomRulesShapeDungeonCreation(t *testing.T) {
+func TestCustomRulesShapeDeathLootDeposit(t *testing.T) {
 	character, err := NewCharacter("hero", "Ash")
 	if err != nil {
 		t.Fatal(err)
@@ -20,17 +19,11 @@ func TestCustomRulesShapeDungeonCreation(t *testing.T) {
 	rules.ItemLegacyValue = func(item CraftedItem) int {
 		return item.Power
 	}
-	rules.DungeonName = func(character Character, run int) string {
-		return fmt.Sprintf("Run %d: %s", run, character.Name)
-	}
-	rules.DungeonDepth = func(Character, int) int {
-		return 42
-	}
-	rules.DungeonAttributes = func(Character, []CraftedItem) map[string]string {
-		return map[string]string{"biome": "glass"}
-	}
 
 	world := NewWorldWithRules(character, rules)
+	if _, err := world.SpawnLootDungeon("glass-cache", "Glass Cache", "glass-field", 42); err != nil {
+		t.Fatal(err)
+	}
 
 	eligible, err := NewCraftedItem("bound-spear", "Bound Spear", "crafter-1", 99, 8)
 	if err != nil {
@@ -42,21 +35,18 @@ func TestCustomRulesShapeDungeonCreation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := world.AddCraftedItem(eligible); err != nil {
+	if err := world.CarryItem(character.ID, eligible); err != nil {
 		t.Fatal(err)
 	}
-	if err := world.AddCraftedItem(ineligible); err != nil {
+	if err := world.CarryItem(character.ID, ineligible); err != nil {
 		t.Fatal(err)
 	}
 
-	dungeon, err := world.KillCharacter("custom rule test")
+	dungeon, err := world.KillCharacterByID(character.ID, "custom rule test", "glass-field")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if dungeon.Name != "Run 1: Ash" {
-		t.Fatalf("dungeon name = %q, want custom name", dungeon.Name)
-	}
 	if dungeon.Depth != 42 {
 		t.Fatalf("dungeon depth = %d, want 42", dungeon.Depth)
 	}
@@ -65,9 +55,6 @@ func TestCustomRulesShapeDungeonCreation(t *testing.T) {
 	}
 	if len(dungeon.Items) != 1 || dungeon.Items[0].ID != eligible.ID {
 		t.Fatalf("dungeon items = %#v, want only eligible item", dungeon.Items)
-	}
-	if dungeon.Attributes["biome"] != "glass" {
-		t.Fatalf("dungeon biome = %q, want glass", dungeon.Attributes["biome"])
 	}
 }
 
@@ -83,15 +70,18 @@ func TestCustomDecayRuleMarksSealedDungeons(t *testing.T) {
 	}
 	world := NewWorldWithRules(character, rules)
 	world.SetClock(func() time.Time { return time.Unix(0, 0).UTC() })
+	if _, err := world.SpawnLootDungeon("old-cache", "Old Cache", DefaultAreaID, 1); err != nil {
+		t.Fatal(err)
+	}
 
 	item, err := NewCraftedItem("old-map", "Old Map", "crafter-1", 1, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := world.AddCraftedItem(item); err != nil {
+	if err := world.CarryItem(character.ID, item); err != nil {
 		t.Fatal(err)
 	}
-	dungeon, err := world.KillCharacter("time")
+	dungeon, err := world.KillCharacterByID(character.ID, "time", DefaultAreaID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,10 +117,10 @@ func TestNegativeCustomScoreRejectsBeforeInventoryMutation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := world.AddCraftedItem(item); err == nil {
+	if err := world.CarryItem(character.ID, item); err == nil {
 		t.Fatal("expected negative custom score to fail")
 	}
-	if len(world.Character.Inventory) != 0 {
-		t.Fatalf("inventory count = %d, want 0", len(world.Character.Inventory))
+	if len(world.PrimaryCharacter.Inventory) != 0 {
+		t.Fatalf("inventory count = %d, want 0", len(world.PrimaryCharacter.Inventory))
 	}
 }

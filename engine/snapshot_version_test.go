@@ -28,8 +28,8 @@ func TestRestoreMigratesLegacyMissingVersionSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if restored.Character.ID != character.ID {
-		t.Fatalf("restored character = %q, want %q", restored.Character.ID, character.ID)
+	if restored.PrimaryCharacter.ID != character.ID {
+		t.Fatalf("restored character = %q, want %q", restored.PrimaryCharacter.ID, character.ID)
 	}
 }
 
@@ -59,10 +59,13 @@ func TestRestoreRebuildsQueryIndices(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := world.AddCraftedItem(item); err != nil {
+	if err := world.CarryItem(character.ID, item); err != nil {
 		t.Fatal(err)
 	}
-	dungeon, err := world.KillCharacter("mirror hall")
+	if _, err := world.SpawnLootDungeon("mirror-cache", "Mirror Cache", DefaultAreaID, 2); err != nil {
+		t.Fatal(err)
+	}
+	dungeon, err := world.KillCharacterByID(character.ID, "mirror hall", DefaultAreaID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,8 +86,8 @@ func TestRestoreRebuildsQueryIndices(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got := len(restored.EventsForTarget(string(dungeon.ID))); got != 1 {
-		t.Fatalf("restored events for dungeon = %d, want 1", got)
+	if got := len(restored.EventsForTarget(string(dungeon.ID))); got != 2 {
+		t.Fatalf("restored events for dungeon = %d, want 2", got)
 	}
 	if got := len(restored.RumorsAbout(string(dungeon.ID))); got != 1 {
 		t.Fatalf("restored rumors about dungeon = %d, want 1", got)
