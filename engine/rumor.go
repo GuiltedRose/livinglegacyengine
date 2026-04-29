@@ -5,8 +5,10 @@ import (
 	"time"
 )
 
+// RumorID is a stable identifier for a rumor.
 type RumorID string
 
+// Rumor is an uncertain claim known by one or more actors.
 type Rumor struct {
 	ID          RumorID           `json:"id"`
 	SourceID    ActorID           `json:"source_id"`
@@ -23,6 +25,7 @@ type Rumor struct {
 	Attributes  map[string]string `json:"attributes,omitempty"`
 }
 
+// NewRumor creates a rumor with validated truth and required identity fields.
 func NewRumor(id RumorID, sourceID ActorID, description string, truth float64, impact int, now time.Time) (Rumor, error) {
 	if id == "" {
 		return Rumor{}, fmt.Errorf("rumor id is required")
@@ -48,6 +51,7 @@ func NewRumor(id RumorID, sourceID ActorID, description string, truth float64, i
 	}, nil
 }
 
+// AddRumor stores a rumor, indexes it, and teaches it to its source actor.
 func (w *World) AddRumor(rumor Rumor) error {
 	if rumor.ID == "" {
 		return fmt.Errorf("rumor id is required")
@@ -79,6 +83,7 @@ func (w *World) AddRumor(rumor Rumor) error {
 	return nil
 }
 
+// SpreadRumor teaches a rumor to a recipient and applies perception effects.
 func (w *World) SpreadRumor(id RumorID, recipient ActorID, distortion float64) (Rumor, error) {
 	if recipient == "" {
 		return Rumor{}, fmt.Errorf("recipient actor id is required")

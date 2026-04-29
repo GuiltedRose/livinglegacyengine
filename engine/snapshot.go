@@ -2,8 +2,10 @@ package engine
 
 import "fmt"
 
+// CurrentSnapshotVersion is the newest snapshot schema version this engine supports.
 const CurrentSnapshotVersion = 1
 
+// WorldSnapshot is portable serializable state for a World.
 type WorldSnapshot struct {
 	Version          int                       `json:"version"`
 	PrimaryCharacter Character                 `json:"primary_character"`
@@ -19,6 +21,7 @@ type WorldSnapshot struct {
 	NextRunID        int                       `json:"next_run_id"`
 }
 
+// Snapshot returns a cloned serializable view of the world.
 func (w *World) Snapshot() WorldSnapshot {
 	return WorldSnapshot{
 		Version:          CurrentSnapshotVersion,
@@ -36,6 +39,7 @@ func (w *World) Snapshot() WorldSnapshot {
 	}
 }
 
+// RestoreWorld validates, migrates, and hydrates a World from a snapshot.
 func RestoreWorld(snapshot WorldSnapshot) (*World, error) {
 	snapshot, err := MigrateSnapshot(snapshot)
 	if err != nil {
@@ -68,6 +72,7 @@ func RestoreWorld(snapshot WorldSnapshot) (*World, error) {
 	return world, nil
 }
 
+// ValidateSnapshot rejects missing, unsupported, or future snapshot schemas.
 func ValidateSnapshot(snapshot WorldSnapshot) error {
 	if snapshot.Version <= 0 {
 		return fmt.Errorf("snapshot version is required")
@@ -81,6 +86,7 @@ func ValidateSnapshot(snapshot WorldSnapshot) error {
 	return nil
 }
 
+// MigrateSnapshot upgrades older snapshot shapes to CurrentSnapshotVersion.
 func MigrateSnapshot(snapshot WorldSnapshot) (WorldSnapshot, error) {
 	switch snapshot.Version {
 	case 0:
@@ -148,11 +154,15 @@ func cloneDeposits(deposits []DepositedLoot) []DepositedLoot {
 	}
 	cloned := make([]DepositedLoot, len(deposits))
 	for i, deposit := range deposits {
-		cloned[i] = deposit
-		cloned[i].Item = cloneItems([]CraftedItem{deposit.Item})[0]
-		cloned[i].Attributes = cloneStringMap(deposit.Attributes)
+		cloned[i] = cloneDeposit(deposit)
 	}
 	return cloned
+}
+
+func cloneDeposit(deposit DepositedLoot) DepositedLoot {
+	deposit.Item = cloneItems([]CraftedItem{deposit.Item})[0]
+	deposit.Attributes = cloneStringMap(deposit.Attributes)
+	return deposit
 }
 
 func cloneActorScores(scores map[ActorID]int) map[ActorID]int {

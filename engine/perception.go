@@ -2,11 +2,13 @@ package engine
 
 import "fmt"
 
+// PerceptionKey indexes one observer's view of one target.
 type PerceptionKey struct {
 	ObserverID ActorID `json:"observer_id"`
 	TargetID   string  `json:"target_id"`
 }
 
+// Perception stores one actor's opinion of a target.
 type Perception struct {
 	ObserverID ActorID           `json:"observer_id"`
 	TargetID   string            `json:"target_id"`
@@ -20,6 +22,7 @@ type Perception struct {
 	Attributes map[string]string `json:"attributes,omitempty"`
 }
 
+// PerceptionDelta describes score and attribute changes to apply to a perception.
 type PerceptionDelta struct {
 	Trust      int
 	Fear       int
@@ -30,6 +33,7 @@ type PerceptionDelta struct {
 	Attributes map[string]string
 }
 
+// NewPerception creates an empty perception record for an observer and target.
 func NewPerception(observerID ActorID, targetID string) Perception {
 	return Perception{
 		ObserverID: observerID,
@@ -39,6 +43,7 @@ func NewPerception(observerID ActorID, targetID string) Perception {
 	}
 }
 
+// Perception returns a cloned perception or an empty default record.
 func (w *World) Perception(observerID ActorID, targetID string) Perception {
 	key := perceptionKey(observerID, targetID)
 	perception, ok := w.Perceptions[key]
@@ -48,10 +53,12 @@ func (w *World) Perception(observerID ActorID, targetID string) Perception {
 	return clonePerception(perception)
 }
 
+// AdjustPerception applies a delta to a custom target ID.
 func (w *World) AdjustPerception(observerID ActorID, targetID string, delta PerceptionDelta) (Perception, error) {
 	return w.AdjustPerceptionForTarget(observerID, NewTargetRef(targetID, TargetCustom, ""), delta)
 }
 
+// AdjustPerceptionForTarget applies a delta to a structured target reference.
 func (w *World) AdjustPerceptionForTarget(observerID ActorID, target TargetRef, delta PerceptionDelta) (Perception, error) {
 	if observerID == "" {
 		return Perception{}, fmt.Errorf("observer actor id is required")
@@ -82,6 +89,7 @@ func (w *World) AdjustPerceptionForTarget(observerID ActorID, target TargetRef, 
 	return clonePerception(perception), nil
 }
 
+// ApplyRumorToPerception converts a rumor into a perception delta with rules.
 func (w *World) ApplyRumorToPerception(observerID ActorID, rumor Rumor) (Perception, error) {
 	delta := w.rules.RumorPerception(rumor)
 	target := rumor.Subject
@@ -100,6 +108,7 @@ func (w *World) ApplyRumorToPerception(observerID ActorID, rumor Rumor) (Percept
 	return w.AdjustPerceptionForTarget(observerID, target, delta)
 }
 
+// ApplyEventToPerception converts an event into a perception delta with rules.
 func (w *World) ApplyEventToPerception(observerID ActorID, event Event) (Perception, error) {
 	delta := w.rules.EventPerception(event)
 	target := event.Subject

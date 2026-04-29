@@ -2,6 +2,7 @@ package engine
 
 import "fmt"
 
+// RecordEvent validates and stores a host-provided world event.
 func (w *World) RecordEvent(event Event) (Event, error) {
 	if event.Type == "" {
 		return Event{}, fmt.Errorf("event type is required")
@@ -15,6 +16,7 @@ func (w *World) RecordEvent(event Event) (Event, error) {
 	return cloneEvent(event), nil
 }
 
+// ObserveEvent teaches an event to one actor and applies event perception rules.
 func (w *World) ObserveEvent(observerID ActorID, event Event) (Perception, error) {
 	if observerID == "" {
 		return Perception{}, fmt.Errorf("observer actor id is required")
@@ -28,6 +30,7 @@ func (w *World) ObserveEvent(observerID ActorID, event Event) (Perception, error
 	return perception, nil
 }
 
+// RecordObservedEvent records an event and applies it for each observer.
 func (w *World) RecordObservedEvent(event Event, observers ...ActorID) (Event, []Perception, error) {
 	recorded, err := w.RecordEvent(event)
 	if err != nil {

@@ -2,9 +2,13 @@ package engine
 
 import "fmt"
 
+// ItemID is the stable host-game identifier for a crafted item.
 type ItemID string
+
+// ActorID is the stable host-game identifier for any actor-like entity.
 type ActorID string
 
+// CraftedItem is an actor-created item eligible for legacy dungeon pools.
 type CraftedItem struct {
 	ID         ItemID            `json:"id"`
 	Name       string            `json:"name"`
@@ -16,6 +20,8 @@ type CraftedItem struct {
 	Attributes map[string]string `json:"attributes,omitempty"`
 }
 
+// NewCraftedItem validates and creates a CraftedItem. Rarity defaults to
+// quality so callers get a useful rarity floor without extra setup.
 func NewCraftedItem(id ItemID, name string, crafterID ActorID, quality int, power int, tags ...string) (CraftedItem, error) {
 	if id == "" {
 		return CraftedItem{}, fmt.Errorf("item id is required")
@@ -45,6 +51,7 @@ func NewCraftedItem(id ItemID, name string, crafterID ActorID, quality int, powe
 	}, nil
 }
 
+// LegacyValue returns the default item score used by the engine.
 func (i CraftedItem) LegacyValue() int {
 	return i.Quality*10 + i.Power
 }

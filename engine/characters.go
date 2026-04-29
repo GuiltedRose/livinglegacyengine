@@ -2,6 +2,7 @@ package engine
 
 import "fmt"
 
+// AddCharacter registers a character in the world character registry.
 func (w *World) AddCharacter(character Character) error {
 	if character.ID == "" {
 		return fmt.Errorf("%w", ErrCharacterRequired)
@@ -13,6 +14,7 @@ func (w *World) AddCharacter(character Character) error {
 	return nil
 }
 
+// CharacterByID returns a cloned character by ID.
 func (w *World) CharacterByID(id CharacterID) (Character, bool) {
 	character, ok := w.Characters[id]
 	if !ok {
@@ -21,6 +23,7 @@ func (w *World) CharacterByID(id CharacterID) (Character, bool) {
 	return cloneCharacter(character), true
 }
 
+// CarryItem adds a crafted item to a character and credits the crafter's score.
 func (w *World) CarryItem(characterID CharacterID, item CraftedItem) error {
 	itemValue := w.rules.ItemLegacyValue(item)
 	if itemValue < 0 {
@@ -53,6 +56,7 @@ func (w *World) CarryItem(characterID CharacterID, item CraftedItem) error {
 	return nil
 }
 
+// KillCharacterByID kills a living character and deposits eligible carried loot.
 func (w *World) KillCharacterByID(characterID CharacterID, cause string, areaID AreaID) (LootDungeon, error) {
 	character, ok := w.Characters[characterID]
 	if !ok {
@@ -88,6 +92,7 @@ func (w *World) KillCharacterByID(characterID CharacterID, cause string, areaID 
 	return dungeon, nil
 }
 
+// RespawnCharacterByID marks a character alive for another run.
 func (w *World) RespawnCharacterByID(characterID CharacterID) error {
 	character, ok := w.Characters[characterID]
 	if !ok {

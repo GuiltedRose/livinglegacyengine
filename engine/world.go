@@ -5,20 +5,31 @@ import (
 	"time"
 )
 
+// EventType identifies a structured world event category.
 type EventType string
 
 const (
-	EventItemCrafted     EventType = "item_crafted"
-	EventCharacterDied   EventType = "character_died"
-	EventLootDeposited   EventType = "loot_deposited"
-	EventDungeonSpawned  EventType = "dungeon_spawned"
-	EventDungeonLooted   EventType = "dungeon_looted"
-	EventDungeonLocked   EventType = "dungeon_locked"
+	// EventItemCrafted records a crafted item entering a character inventory.
+	EventItemCrafted EventType = "item_crafted"
+	// EventCharacterDied records a character death that successfully deposited loot.
+	EventCharacterDied EventType = "character_died"
+	// EventLootDeposited records eligible crafted loot entering an area dungeon.
+	EventLootDeposited EventType = "loot_deposited"
+	// EventDungeonSpawned records a pre-spawned loot dungeon being added to the world.
+	EventDungeonSpawned EventType = "dungeon_spawned"
+	// EventDungeonLooted records a dungeon clear and reward claim.
+	EventDungeonLooted EventType = "dungeon_looted"
+	// EventDungeonLocked records a dungeon locking to the actor who cleared it.
+	EventDungeonLocked EventType = "dungeon_locked"
+	// EventDungeonUnlocked records a locked dungeon reopening after its owner dies with eligible loot.
 	EventDungeonUnlocked EventType = "dungeon_unlocked"
-	EventDungeonDecayed  EventType = "dungeon_decayed"
-	EventRespawned       EventType = "character_respawned"
+	// EventDungeonDecayed records a sealed dungeon decaying by rule policy.
+	EventDungeonDecayed EventType = "dungeon_decayed"
+	// EventRespawned records a character returning after death.
+	EventRespawned EventType = "character_respawned"
 )
 
+// Event is a structured timeline entry recorded by the engine or host game.
 type Event struct {
 	Type        EventType         `json:"type"`
 	At          time.Time         `json:"at"`
@@ -30,6 +41,7 @@ type Event struct {
 	Data        map[string]string `json:"data,omitempty"`
 }
 
+// World contains all mutable engine state for one simulated world.
 type World struct {
 	PrimaryCharacter Character
 	Characters       map[CharacterID]Character
@@ -47,10 +59,12 @@ type World struct {
 	indices   worldIndices
 }
 
+// NewWorld creates a world with DefaultRules and a primary character.
 func NewWorld(character Character) *World {
 	return NewWorldWithRules(character, DefaultRules())
 }
 
+// NewWorldWithRules creates a world with host-provided rules.
 func NewWorldWithRules(character Character, rules Rules) *World {
 	return &World{
 		PrimaryCharacter: character,
@@ -66,16 +80,19 @@ func NewWorldWithRules(character Character, rules Rules) *World {
 	}
 }
 
+// SetClock replaces the world's time source when now is non-nil.
 func (w *World) SetClock(now func() time.Time) {
 	if now != nil {
 		w.now = now
 	}
 }
 
+// SetRules replaces runtime policy hooks after normalizing missing hooks to defaults.
 func (w *World) SetRules(rules Rules) {
 	w.rules = rules.normalized()
 }
 
+// SpawnLootDungeon creates a dormant area dungeon during world setup.
 func (w *World) SpawnLootDungeon(id DungeonID, name string, areaID AreaID, depth int) (LootDungeon, error) {
 	dungeon, err := NewSpawnedLootDungeon(id, name, areaID, depth, w.now())
 	if err != nil {
@@ -97,6 +114,7 @@ func (w *World) SpawnLootDungeon(id DungeonID, name string, areaID AreaID, depth
 	return dungeon, nil
 }
 
+// DepositDeathLoot deposits eligible crafted items into the area's spawned dungeon.
 func (w *World) DepositDeathLoot(actorID ActorID, areaID AreaID, items []CraftedItem, cause string) (LootDungeon, error) {
 	if actorID == "" {
 		return LootDungeon{}, fmt.Errorf("%w", ErrActorRequired)
@@ -151,6 +169,7 @@ func (w *World) DepositDeathLoot(actorID ActorID, areaID AreaID, items []Crafted
 		}
 		dungeon.Deposits = append(dungeon.Deposits, deposit)
 		dungeon.Items = append(dungeon.Items, item)
+		w.applyDepositHooks(deposit)
 	}
 	dungeon.LegacyValue += depositValue
 	if dungeon.Status != DungeonLocked {
@@ -172,6 +191,7 @@ func (w *World) DepositDeathLoot(actorID ActorID, areaID AreaID, items []Crafted
 	return dungeon, nil
 }
 
+// LootDungeon claims one reward from an active dungeon and locks it to the looter.
 func (w *World) LootDungeon(id DungeonID, looter ActorID) ([]CraftedItem, error) {
 	if looter == "" {
 		return nil, fmt.Errorf("%w", ErrActorRequired)
@@ -213,6 +233,7 @@ func (w *World) LootDungeon(id DungeonID, looter ActorID) ([]CraftedItem, error)
 	lootValue := w.rules.ItemLegacyValue(source)
 	dungeon.Deposits[depositIndex].ClaimedBy = looter
 	dungeon.Deposits[depositIndex].ClaimedAt = w.now()
+	claimedDeposit := dungeon.Deposits[depositIndex]
 	dungeon.Items = append(dungeon.Items[:index], dungeon.Items[index+1:]...)
 	dungeon.LegacyValue -= lootValue
 	if dungeon.LegacyValue < 0 {
@@ -242,9 +263,33 @@ func (w *World) LootDungeon(id DungeonID, looter ActorID) ([]CraftedItem, error)
 		Subject:     NewTargetRef(string(looter), TargetActor, ""),
 		Object:      DungeonRef(dungeon),
 	})
+	w.applyClaimHooks(claimedDeposit, reward)
 	return cloneItems(loot), nil
 }
 
+func (w *World) applyDepositHooks(deposit DepositedLoot) {
+	for _, event := range w.rules.DepositEvents(deposit) {
+		w.record(event)
+	}
+	for _, rumor := range w.rules.DepositRumors(deposit) {
+		if err := w.AddRumor(rumor); err != nil {
+			continue
+		}
+	}
+}
+
+func (w *World) applyClaimHooks(deposit DepositedLoot, reward CraftedItem) {
+	for _, event := range w.rules.ClaimEvents(deposit, reward) {
+		w.record(event)
+	}
+	for _, rumor := range w.rules.ClaimRumors(deposit, reward) {
+		if err := w.AddRumor(rumor); err != nil {
+			continue
+		}
+	}
+}
+
+// DecayDungeons applies the configured decay rule to sealed dungeons.
 func (w *World) DecayDungeons() []DungeonID {
 	now := w.now()
 	decayed := []DungeonID{}

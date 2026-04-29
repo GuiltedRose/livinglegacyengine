@@ -28,6 +28,8 @@ go run ./cmd/legacy-demo
 
 The public API currently lives in `engine/` and is intentionally dependency-free so it can be embedded into a server, local game, simulation worker, command loop, or tool.
 
+For a complete host-game wiring path, see [docs/integration.md](docs/integration.md).
+
 ## Integration Boundaries
 
 The engine owns:
@@ -91,6 +93,16 @@ rules.LootReward = func(source engine.CraftedItem) engine.CraftedItem {
 	reward.Rarity = source.Rarity + 1
 	return reward
 }
+rules.DepositEvents = func(deposit engine.DepositedLoot) []engine.Event {
+	if deposit.Item.Rarity < 5 {
+		return nil
+	}
+	return []engine.Event{{
+		Type:        engine.EventLootDeposited,
+		Description: "A rare crafted item entered the pool.",
+		Object:      engine.ItemRef(deposit.Item),
+	}}
+}
 
 world := engine.NewWorldWithRules(character, rules)
 ```
@@ -101,6 +113,10 @@ Available hooks:
 - `ShouldDecayDungeon`: decides when active dungeons decay
 - `SelectLoot`: chooses which pooled item is returned on clear
 - `LootReward`: maps a dropped crafted item to the reward returned by a dungeon clear
+- `DepositEvents`: emits extra events when loot enters a dungeon pool
+- `ClaimEvents`: emits extra events when deposited loot is claimed
+- `DepositRumors`: emits rumors when loot enters a dungeon pool
+- `ClaimRumors`: emits rumors when deposited loot is claimed
 - `RumorPerception`: maps a rumor into perception changes
 - `EventPerception`: maps an event into perception changes
 
@@ -220,6 +236,17 @@ Each deposited item is also stored as a `DepositedLoot` record. The record keeps
 
 `LootDungeon.Items` is a compatibility mirror of the current unclaimed pool. `LootDungeon.Deposits` is the durable provenance ledger, including claimed loot.
 
+Deposit query helpers:
+- `DepositsByDropper`
+- `DepositsByClaimer`
+- `DepositsInDungeon`
+- `UnclaimedDepositsInDungeon`
+- `DepositsInArea`
+- `UnclaimedDepositsInArea`
+- `DepositsForItem`
+
+Deposit and claim hooks can emit additional events or rumors. This is useful for rare item callouts, crafting fame, regional gossip, audit logs, and world-history UI without forcing every game to use the same rarity scale.
+
 ### 4. Event Log
 The world records major events:
 - Crafted item added
@@ -303,6 +330,13 @@ The engine exposes clone-returning query helpers for common timeline and state q
 - `MemoriesOf`
 - `PerceptionsByObserver`
 - `PerceptionsAbout`
+- `DepositsByDropper`
+- `DepositsByClaimer`
+- `DepositsInDungeon`
+- `UnclaimedDepositsInDungeon`
+- `DepositsInArea`
+- `UnclaimedDepositsInArea`
+- `DepositsForItem`
 
 These helpers are intentionally small and composable. Host games can build richer search, indexing, UI views, or analytics on top.
 

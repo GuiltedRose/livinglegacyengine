@@ -6,22 +6,34 @@ import (
 	"time"
 )
 
+// DungeonID is the stable host-game identifier for a loot dungeon.
 type DungeonID string
+
+// AreaID identifies the host-game area whose death loot feeds a dungeon.
 type AreaID string
 
+// DungeonStatus describes whether a loot dungeon is available, locked, or dead.
 type DungeonStatus string
 
 const (
+	// DefaultAreaID is used when callers omit an area.
 	DefaultAreaID AreaID = "default"
 
+	// DungeonDormant means the dungeon exists but has no accessible death loot.
 	DungeonDormant DungeonStatus = "dormant"
-	DungeonActive  DungeonStatus = "active"
-	DungeonLocked  DungeonStatus = "locked"
-	DungeonSealed  DungeonStatus = DungeonActive
-	DungeonLooted  DungeonStatus = "looted"
+	// DungeonActive means the dungeon has deposited loot and can be cleared.
+	DungeonActive DungeonStatus = "active"
+	// DungeonLocked means the last clearer cannot farm it again until they die with crafted loot.
+	DungeonLocked DungeonStatus = "locked"
+	// DungeonSealed is a compatibility alias for DungeonActive.
+	DungeonSealed DungeonStatus = DungeonActive
+	// DungeonLooted is retained for save compatibility; new clears use DungeonLocked.
+	DungeonLooted DungeonStatus = "looted"
+	// DungeonDecayed means the dungeon is no longer usable.
 	DungeonDecayed DungeonStatus = "decayed"
 )
 
+// LootDungeon is a pre-spawned area container for crafted death loot.
 type LootDungeon struct {
 	ID          DungeonID         `json:"id"`
 	Name        string            `json:"name"`
@@ -38,6 +50,7 @@ type LootDungeon struct {
 	Attributes  map[string]string `json:"attributes,omitempty"`
 }
 
+// NewSpawnedLootDungeon validates and creates a dormant loot dungeon.
 func NewSpawnedLootDungeon(id DungeonID, name string, areaID AreaID, depth int, now time.Time) (LootDungeon, error) {
 	if id == "" {
 		return LootDungeon{}, fmt.Errorf("dungeon id is required")
