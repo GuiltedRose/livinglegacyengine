@@ -179,6 +179,88 @@ if err := world.AddRumor(rumor); err != nil {
 _, err = world.SpreadRumor(rumor.ID, "witness-2", 0.1)
 ```
 
+Generate setting history when NPC dialogue should come from LLE-owned NPCs, factions, and ties:
+
+```go
+history, err := world.GenerateWorldHistory(engine.WorldGenerationOptions{
+	Seed:         12,
+	NPCCount:     3,
+	FactionCount: 2,
+	TieCount:     5,
+	NPCNames:     []string{"Rin", "Sable", "Oren"},
+	FactionNames: []string{"Lantern Compact", "Ash Stair Keepers"},
+	Era:          "ash stair founding",
+})
+if err != nil {
+	return err
+}
+
+_ = history
+```
+
+For immediate NPC chatter, ask for a generated remark. It prefers known rumors, then generated world-history ties, then runtime history, then injected lore:
+
+```go
+remark := world.GenerateRemark(engine.TextGenerationContext{
+	SourceID: "guard-2",
+	TargetID: "npc-rin",
+})
+```
+
+Use lore hooks when your game wants to add map, quest, biome, or presentation context to LLE-owned history:
+
+```go
+rules := engine.DefaultRules()
+rules.LoreFacts = func(context engine.TextGenerationContext) []engine.LoreFact {
+	if context.TargetID != "ash-cache" {
+		return nil
+	}
+	return []engine.LoreFact{{
+		Text:   "The stair keepers call this an unpaid oath.",
+		Object: engine.NewTargetRef("ash-cache", engine.TargetDungeon, "Ash Cache"),
+		Weight: 10,
+	}}
+}
+
+world.SetRules(rules)
+```
+
+Generate rumors from runtime event history when dialogue should track what happened during play:
+
+```go
+rumors, err := world.GenerateRumorsFromEvents(engine.EventRumorOptions{
+	SourceID: "witness-1",
+	TargetID: "ash-cache",
+	Limit:    3,
+	Truth:    0.85,
+	Impact:   4,
+})
+if err != nil {
+	return err
+}
+_ = rumors
+```
+
+For a single host event, record runtime history and generate the rumor in one call:
+
+```go
+event, rumor, err := world.RecordEventWithGeneratedRumor(engine.Event{
+	Type:        engine.EventRespawned,
+	Description: "Ash returned under the old moon.",
+	Subject:     engine.CharacterRef(character),
+}, engine.EventRumorOptions{
+	SourceID: "witness-1",
+	Truth:    0.9,
+	Impact:   3,
+})
+if err != nil {
+	return err
+}
+
+_ = event
+_ = rumor
+```
+
 Actors learn events and rumors through memory. Rumors and observed events can also change perception through `Rules.RumorPerception` and `Rules.EventPerception`.
 
 ## Query State

@@ -34,6 +34,7 @@ For a complete host-game wiring path, see [docs/integration.md](docs/integration
 
 The engine owns:
 - Actor registry
+- Engine-owned NPC, faction, and tie generation
 - Character registry, plus an explicit `PrimaryCharacter` convenience field
 - Target references for actors, items, dungeons, regions, events, and host-game concepts
 - Character death/respawn state
@@ -41,6 +42,7 @@ The engine owns:
 - Loot dungeon spawning, death loot deposits, clearing, and anti-farm locks
 - Legacy scoring
 - Rumor creation and propagation
+- Generated rumor text from structured world history
 - Actor memory records
 - Actor-scoped perception records
 - Structured event history
@@ -117,12 +119,99 @@ Available hooks:
 - `ClaimEvents`: emits extra events when deposited loot is claimed
 - `DepositRumors`: emits rumors when loot enters a dungeon pool
 - `ClaimRumors`: emits rumors when deposited loot is claimed
+- `LoreFacts`: injects host-game lore into generated text
+- `EventRumorText`: turns runtime events and lore into rumor wording
 - `RumorPerception`: maps a rumor into perception changes
 - `EventPerception`: maps an event into perception changes
 
 `LootReward` may upgrade a reward, but it may not return an item with lower rarity than the dropped source item.
 
 Rules are runtime policy, not saved state. Snapshots store the world data; host games should restore the world and then apply the rules for that game/version.
+
+## World History And Generated Remarks
+
+The engine can generate NPCs, factions, and ties between them. These ties are stored as `WorldHistory`, not runtime events, so NPC remarks can be grounded in setting history instead of stale hardcoded lines.
+
+```go
+history, err := world.GenerateWorldHistory(engine.WorldGenerationOptions{
+	Seed:         12,
+	NPCCount:     3,
+	FactionCount: 2,
+	TieCount:     5,
+	NPCNames:     []string{"Rin", "Sable", "Oren"},
+	FactionNames: []string{"Lantern Compact", "Ash Stair Keepers"},
+	Era:          "ash stair founding",
+})
+if err != nil {
+	return err
+}
+
+_ = history
+```
+
+For lightweight NPC chatter, use `GenerateRemark`. It prefers known rumors, then generated world-history ties, then runtime history, then injected lore:
+
+```go
+remark := world.GenerateRemark(engine.TextGenerationContext{
+	SourceID: "guard-2",
+	TargetID: "npc-rin",
+})
+```
+
+Host games can still inject extra lore into generated text. The LLE owns generated NPCs, factions, and ties, while `LoreFacts` lets a game add world-map context, quest state, biome details, or presentation flavor.
+
+```go
+rules := engine.DefaultRules()
+rules.LoreFacts = func(context engine.TextGenerationContext) []engine.LoreFact {
+	if context.TargetID != "ash-cache" {
+		return nil
+	}
+	return []engine.LoreFact{{
+		Text:   "The stair keepers call this an unpaid oath.",
+		Object: engine.NewTargetRef("ash-cache", engine.TargetDungeon, "Ash Cache"),
+		Weight: 10,
+	}}
+}
+```
+
+## Event-Derived Rumors
+
+When a host game wants rumors from runtime events, the same text hooks can turn recorded event history into rumor text.
+
+```go
+rumors, err := world.GenerateRumorsFromEvents(engine.EventRumorOptions{
+	SourceID: "witness-1",
+	TargetID: "ash-cache",
+	Limit:    3,
+	Truth:    0.85,
+	Impact:   4,
+})
+if err != nil {
+	return err
+}
+```
+
+`GenerateRumorsFromEvents` walks structured events, generates rumor descriptions, stores the rumors, and links them back to event targets. Host games can replace `EventRumorText` for their own voice, or keep the default generator and use `LoreFacts` to inject regional lore, faction beliefs, character relationships, prophecies, biome facts, quest state, or anything else the game owns.
+
+For the single-pass path, record a host event and mint its rumor together:
+
+```go
+event, rumor, err := world.RecordEventWithGeneratedRumor(engine.Event{
+	Type:        engine.EventRespawned,
+	Description: "Mara returned under the old moon.",
+	Subject:     engine.CharacterRef(character),
+}, engine.EventRumorOptions{
+	SourceID: "witness-1",
+	Truth:    0.9,
+	Impact:   3,
+})
+if err != nil {
+	return err
+}
+
+_ = event
+_ = rumor
+```
 
 ## Persistence
 

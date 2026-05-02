@@ -29,6 +29,15 @@ type DepositRumorsRule func(deposit DepositedLoot) []Rumor
 // ClaimRumorsRule emits rumors when deposited loot is claimed.
 type ClaimRumorsRule func(deposit DepositedLoot, reward CraftedItem) []Rumor
 
+// LoreInjectionRule provides host-game lore facts for generated text.
+type LoreInjectionRule func(context TextGenerationContext) []LoreFact
+
+// HistoryRumorTextRule turns one recorded event plus injected lore into rumor text.
+type HistoryRumorTextRule func(context HistoryRumorTextContext) GeneratedText
+
+// EventRumorTextRule turns one recorded runtime event plus injected lore into rumor text.
+type EventRumorTextRule func(context HistoryRumorTextContext) GeneratedText
+
 // RumorPerceptionRule maps a rumor to a perception change.
 type RumorPerceptionRule func(rumor Rumor) PerceptionDelta
 
@@ -46,6 +55,9 @@ type Rules struct {
 	ClaimEvents        ClaimEventsRule
 	DepositRumors      DepositRumorsRule
 	ClaimRumors        ClaimRumorsRule
+	LoreFacts          LoreInjectionRule
+	EventRumorText     EventRumorTextRule
+	HistoryRumorText   HistoryRumorTextRule
 	RumorPerception    RumorPerceptionRule
 	EventPerception    EventPerceptionRule
 }
@@ -80,6 +92,11 @@ func DefaultRules() Rules {
 		ClaimRumors: func(DepositedLoot, CraftedItem) []Rumor {
 			return nil
 		},
+		LoreFacts: func(TextGenerationContext) []LoreFact {
+			return nil
+		},
+		EventRumorText:   DefaultHistoryRumorText,
+		HistoryRumorText: DefaultHistoryRumorText,
 		RumorPerception: func(rumor Rumor) PerceptionDelta {
 			confidence := int(rumor.Truth * 100)
 			return PerceptionDelta{
@@ -121,6 +138,19 @@ func (r Rules) normalized() Rules {
 	}
 	if r.ClaimRumors == nil {
 		r.ClaimRumors = defaults.ClaimRumors
+	}
+	if r.LoreFacts == nil {
+		r.LoreFacts = defaults.LoreFacts
+	}
+	if r.EventRumorText == nil {
+		if r.HistoryRumorText != nil {
+			r.EventRumorText = EventRumorTextRule(r.HistoryRumorText)
+		} else {
+			r.EventRumorText = defaults.EventRumorText
+		}
+	}
+	if r.HistoryRumorText == nil {
+		r.HistoryRumorText = HistoryRumorTextRule(r.EventRumorText)
 	}
 	if r.RumorPerception == nil {
 		r.RumorPerception = defaults.RumorPerception

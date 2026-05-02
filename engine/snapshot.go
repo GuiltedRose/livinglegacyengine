@@ -3,7 +3,7 @@ package engine
 import "fmt"
 
 // CurrentSnapshotVersion is the newest snapshot schema version this engine supports.
-const CurrentSnapshotVersion = 1
+const CurrentSnapshotVersion = 2
 
 // WorldSnapshot is portable serializable state for a World.
 type WorldSnapshot struct {
@@ -18,6 +18,8 @@ type WorldSnapshot struct {
 	Memories         map[ActorID]Memory        `json:"memories,omitempty"`
 	Perceptions      []Perception              `json:"perceptions,omitempty"`
 	Events           []Event                   `json:"events,omitempty"`
+	Ties             []Tie                     `json:"ties,omitempty"`
+	WorldHistory     []WorldHistoryEntry       `json:"world_history,omitempty"`
 	NextRunID        int                       `json:"next_run_id"`
 }
 
@@ -35,6 +37,8 @@ func (w *World) Snapshot() WorldSnapshot {
 		Memories:         cloneMemories(w.Memories),
 		Perceptions:      clonePerceptionList(w.Perceptions),
 		Events:           cloneEvents(w.Events),
+		Ties:             cloneTies(w.Ties),
+		WorldHistory:     cloneWorldHistory(w.WorldHistory),
 		NextRunID:        w.nextRunID,
 	}
 }
@@ -67,6 +71,8 @@ func RestoreWorld(snapshot WorldSnapshot) (*World, error) {
 	world.Memories = cloneMemories(snapshot.Memories)
 	world.Perceptions = perceptionsFromList(snapshot.Perceptions)
 	world.Events = cloneEvents(snapshot.Events)
+	world.Ties = cloneTies(snapshot.Ties)
+	world.WorldHistory = cloneWorldHistory(snapshot.WorldHistory)
 	world.nextRunID = snapshot.NextRunID
 	world.rebuildIndices()
 	return world, nil
@@ -95,7 +101,7 @@ func MigrateSnapshot(snapshot WorldSnapshot) (WorldSnapshot, error) {
 			snapshot.PrimaryCharacter = snapshot.Character
 		}
 		return snapshot, nil
-	case CurrentSnapshotVersion:
+	case 1, CurrentSnapshotVersion:
 		if snapshot.PrimaryCharacter.ID == "" {
 			snapshot.PrimaryCharacter = snapshot.Character
 		}

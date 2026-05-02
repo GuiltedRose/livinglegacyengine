@@ -6,6 +6,8 @@ import "fmt"
 type ActorKind string
 
 const (
+	// ActorNPC represents an engine-owned non-player character.
+	ActorNPC ActorKind = "npc"
 	// ActorCharacter represents a character-like actor.
 	ActorCharacter ActorKind = "character"
 	// ActorCrafter represents an actor primarily known for creating items.

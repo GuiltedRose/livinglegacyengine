@@ -52,6 +52,8 @@ type World struct {
 	Memories         map[ActorID]Memory
 	Perceptions      map[PerceptionKey]Perception
 	Events           []Event
+	Ties             []Tie
+	WorldHistory     []WorldHistoryEntry
 
 	now       func() time.Time
 	nextRunID int
